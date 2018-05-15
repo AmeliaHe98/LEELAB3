@@ -11,13 +11,13 @@ from Bio import SeqIO
 from collections import namedtuple
 import urllib.request, urllib.parse, urllib.error
 
+RefGenesOnly = []
+RefGenes = []
+variantOutputFile = pd.DataFrame()
 InNucs = 2 #number of nucleotides on the boundaries of introns
 RecNucs = 2 #number of nucleotides on the boundaries of introns that will be written to the output text file.
-# Note that this must be a number greater than or equal to InNucs. Default 5.
 
-#Initialized GeneInfo named tuple. Note: namedtuple is immutable
-gffInfoFields = ["Chromosome", "Source", "SeqType", "LeftPos", "RightPos", "Score", "Orientation", "Frame", "Name"]
-GFFRecord = namedtuple("GFFRecord", gffInfoFields)
+
 
 VCFDir = '/Users/Amelia/Desktop/lab' #directory containing the VCFs
 VarEffDir = '/Users/Amelia/Desktop/lab' #directory of output file containing information on each variant
@@ -38,43 +38,16 @@ def fa_file(fa_file):
         mydict[seq_record.id] = str(seq_record.seq).upper()
     return mydict
 
-def gff_file(gff_file):
-    '''
-    parse a gff file and return a dictionary
-    :param gff_file: gff file
-    :return: dictionary with name as key and everything else as value
-    '''
-    ret = {}
-    with open(gff_file) as infile:
-        for line in infile:
-            parts = line.strip().split("\t")
-            if(len(parts)==9):
-            # Normalize data
-                normalizedInfo = [
-                    urllib.parse.unquote(parts[0]),
-                    urllib.parse.unquote(parts[1]),
-                    urllib.parse.unquote(parts[2]),
-                    int(parts[3]),
-                    int(parts[4]),
-                    urllib.parse.unquote(parts[5]),
-                    urllib.parse.unquote(parts[6]),
-                    urllib.parse.unquote(parts[7]),
-                    urllib.parse.unquote(parts[8])
-                ]
-                ret[parts[8]] = normalizedInfo
-    return ret
-
-
-def vcf_file(vcf_files):
+def vcf_file(vcf_file):
     '''
     read a vfc file and perform decision making for each variant file
     :param vcf_files: vfc file
     :return: cvs
     '''
-    variantOutputFile = cvs_files()
-    for f in vcf_files:
-        with open(f, mode='r') as vcf:
-            vcf.read()
+    for f in vcf_file:
+        vcf_reader = vcf.Reader(open(f, 'r'))
+        for record in vcf_reader:
+            findPositions(record)
             #do something here with each vcf file
 
 
@@ -87,6 +60,7 @@ def vcf_files(vcf_dir):
     files = []
     for file in glob.glob(os.path.join(vcf_dir, '*.vcf')):
         files.append(file)
+
     return vcf_file(files)
 
 
@@ -99,9 +73,69 @@ def cvs_files():
     d = {'Chromosome':[], 'Position':[],'Ref':[],'Alt':[],'GenomeLocation':[],'GeneName':[],
          'mRNAName':[],'GeneLocation':[],'MutationType':[],'RefCodonOrSpliceJun':[],
          'AltCodonOrSpliceJun':[],'RefAA':[],'AltAA':[]}
-    df = pd.DataFrame(data=d)
-    return df
+    variantOutputFile = pd.DataFrame(data=d)
 
+def gff_file(gff_file):
+    '''
+    parse a gff file and return a dictionary of refGenes if (seqType==gene)
+    :param gff_file: gff file
+    :return: none
+    '''
+    with open(gff_file) as infile:
+        for line in infile:
+            parts = line.strip().split("\t")
+            if(len(parts)==9):
+                #Normalize data
+                normalizedInfo = [
+                        urllib.parse.unquote(parts[0]), #Chromosome
+                        urllib.parse.unquote(parts[1]), #Source
+                        urllib.parse.unquote(parts[2]), #SeqType
+                        int(parts[3]), #Left.Pos
+                        int(parts[4]), #Right.Pos
+                        urllib.parse.unquote(parts[5]), #Score
+                        urllib.parse.unquote(parts[6]), #Orientation
+                        urllib.parse.unquote(parts[7]), #Frame
+                        urllib.parse.unquote(parts[8]) #Name
+                ]
+                    #store it in a list
+                if (parts[2] == "gene"):
+                    RefGenesOnly.append(normalizedInfo)
+                else:
+                    RefGenes.append(normalizedInfo)
+
+def findPositions(record):
+    '''
+    Determine which positions in the genome are affected by the given variant
+    :param Record
+    :return: list
+    '''
+    start = record.POS
+    end = len(record.REF)-1+record.POS
+    VarPos = []
+    variantOutputFile = cvs_files()
+
+    while start < end:
+        VarPos.append(start)
+        start = start + 1
+
+    variantOutputFile.Chromosome = record.CHROM
+    variantOutputFile.Position = record.POS
+    variantOutputFile.Ref = record.Ref
+    variantOutputFile.Alt = record.Alt
+
+    if(not withinPositions(record,VarPos)):
+        variantOutputFile.GenomeLocation = "Intergenic"
+    else:
+
+
+def withinPositions(record, VarPos):
+    '''
+    if any genes that the given variant position is found within.
+    :param Record, list
+    :return: boolean
+    '''
+    for gene in RefGenesOnly:
+        return (len(VarPos)!=0 and record.CHROM == gene[0] and VarPos[0]<=gene[4] and VarPos[len(VarPos)-1] >= gene[3])
 
 def main():
     fa_file(RefGenomeFile)
