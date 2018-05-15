@@ -11,8 +11,8 @@ from Bio import SeqIO
 from collections import namedtuple
 import urllib.request, urllib.parse, urllib.error
 
-RefGenesOnly = []
 RefGenes = []
+RefGenesOnly = []
 variantOutputFile = pd.DataFrame()
 InNucs = 2 #number of nucleotides on the boundaries of introns
 RecNucs = 2 #number of nucleotides on the boundaries of introns that will be written to the output text file.
@@ -68,11 +68,12 @@ def cvs_files():
     '''
     create a cvs file and store the variant information. Can be mutated
     :param not sure if needed
-    :return: DataFrame
+    :return:
     '''
     d = {'Chromosome':[], 'Position':[],'Ref':[],'Alt':[],'GenomeLocation':[],'GeneName':[],
          'mRNAName':[],'GeneLocation':[],'MutationType':[],'RefCodonOrSpliceJun':[],
          'AltCodonOrSpliceJun':[],'RefAA':[],'AltAA':[]}
+    global variantOutputFile
     variantOutputFile = pd.DataFrame(data=d)
 
 def gff_file(gff_file):
@@ -97,11 +98,11 @@ def gff_file(gff_file):
                         urllib.parse.unquote(parts[7]), #Frame
                         urllib.parse.unquote(parts[8]) #Name
                 ]
-                    #store it in a list
-                if (parts[2] == "gene"):
-                    RefGenesOnly.append(normalizedInfo)
-                else:
-                    RefGenes.append(normalizedInfo)
+                # store it in a list
+                RefGenes.append(normalizedInfo)
+
+    # gene = np.array(RefGenes)
+    # print(np.where(gene=='gene'))
 
 def findPositions(record):
     '''
@@ -112,30 +113,66 @@ def findPositions(record):
     start = record.POS
     end = len(record.REF)-1+record.POS
     VarPos = []
-    variantOutputFile = cvs_files()
 
     while start < end:
         VarPos.append(start)
         start = start + 1
-
+    global variantOutputFile
     variantOutputFile.Chromosome = record.CHROM
     variantOutputFile.Position = record.POS
-    variantOutputFile.Ref = record.Ref
-    variantOutputFile.Alt = record.Alt
+    variantOutputFile.Ref = record.REF
+    variantOutputFile.Alt = record.ALT
 
-    if(not withinPositions(record,VarPos)):
-        variantOutputFile.GenomeLocation = "Intergenic"
-    else:
+    RefGene = SeqType(record,VarPos)
+    if RefGene is None:
+        return
+    s = RefGene[8]
+    startmRNAName = s.find('Name=') + 5
+    startgeneName = s.find('ID=') + 3
+    endgeneName = s.find(';')
+    variantOutputFile.GeneName = s[startgeneName:endgeneName]
+    # Returns from Name= to the end of the string
+    variantOutputFile.mRNAName = s[startmRNAName:]
+    if (RefGene[2] == "five_prime_UTR"):
+        if((VarPos[1] > RefGene[4] and RefGene[6] == "-") or (VarPos[len(VarPos)] < RefGene[3] and RefGene[6]==  "+")):
+#            global variantOutputFile
+            variantOutputFile.GeneLocation = "five_prime_untranscribed"
+        else:
+#            global variantOutputFile
+            variantOutputFile.GeneLocation="five_prime_UTR"
+    elif (RefGene[2] == "three_prime_UTR"):
+        if((VarPos[1] > RefGene[4] and RefGene[6] == "+") or (VarPos[len(VarPos)] < RefGene[3] and RefGene[6]==  "-")):
+
+            variantOutputFile.GeneLocation = "five_prime_untranscribed"
+        else:
+            variantOutputFile.GeneLocation = "three_prime_UTR"
+    #only cds and mRNA left
 
 
-def withinPositions(record, VarPos):
+
+
+
+
+def SeqType(record, VarPos):
     '''
     if any genes that the given variant position is found within.
     :param Record, list
-    :return: boolean
+    :return: gene
     '''
-    for gene in RefGenesOnly:
-        return (len(VarPos)!=0 and record.CHROM == gene[0] and VarPos[0]<=gene[4] and VarPos[len(VarPos)-1] >= gene[3])
+    for gene in RefGenes:
+        # return gene
+        global variantOutputFile
+        if (len(VarPos) != 0 and record.CHROM == gene[0]
+                and gene[4] >= VarPos[0] >= gene[3]
+                and gene[4] >= VarPos[len(VarPos) - 1] >= gene[3]):
+            variantOutputFile.GenomeLocation = "Genic"
+            return gene
+        else:
+            variantOutputFile.GenomeLocation = "Intergenic"
+            return None
+
+
+
 
 def main():
     fa_file(RefGenomeFile)
